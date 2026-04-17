@@ -810,17 +810,67 @@ img, canvas, svg {
       currentPage: 'dashboard',
     };
 
+    const API_BASE = localStorage.getItem('nw_api_base') || 'http://localhost:8080/api/state';
+    let syncTimer = null;
+
+    function mergeStateWithDefaults(remoteState) {
+      const merged = { ...state, ...(remoteState || {}) };
+      if (!Array.isArray(merged.categories) || merged.categories.length === 0) {
+        merged.categories = state.categories;
+      }
+      if (!Array.isArray(merged.transactions)) merged.transactions = [];
+      if (!Array.isArray(merged.assets)) merged.assets = [];
+      merged.user = { ...state.user, ...(merged.user || {}) };
+      merged.settings = { ...state.settings, ...(merged.settings || {}) };
+      return merged;
+    }
+
     // Load from localStorage
-    function loadState() {
+    function loadLocalState() {
       try {
         const saved = localStorage.getItem('nw_state');
-        if (saved) { const s = JSON.parse(saved); state = { ...state, ...s }; }
+        if (saved) {
+          const s = JSON.parse(saved);
+          state = mergeStateWithDefaults(s);
+        }
       } catch(e) {}
     }
     function saveState() {
       localStorage.setItem('nw_state', JSON.stringify(state));
+      scheduleServerSync();
     }
-    loadState();
+    loadLocalState();
+
+    async function loadStateFromServer() {
+      try {
+        const res = await fetch(API_BASE, { method: 'GET' });
+        if (!res.ok) return;
+        const remote = await res.json();
+        if (remote && typeof remote === 'object') {
+          state = mergeStateWithDefaults(remote);
+          localStorage.setItem('nw_state', JSON.stringify(state));
+        }
+      } catch (e) {
+        // fallback to local-only mode silently
+      }
+    }
+
+    function scheduleServerSync() {
+      if (syncTimer) clearTimeout(syncTimer);
+      syncTimer = setTimeout(syncStateToServer, 400);
+    }
+
+    async function syncStateToServer() {
+      try {
+        await fetch(API_BASE, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(state)
+        });
+      } catch (e) {
+        // keep local mode if backend unavailable
+      }
+    }
 
     // ===== NAVIGATION =====
     const pageInfo = {
@@ -1227,9 +1277,16 @@ img, canvas, svg {
       if(!confirm('Clear ALL data? This cannot be undone.')) return;
       state.transactions=[]; state.assets=[];
       saveState(); renderDashboard(); renderAssets();
+      fetch(API_BASE, { method: 'DELETE' }).catch(()=>{});
       showToast('Data cleared');
     }
-    function handleLogout() { if(confirm('Logout?')) { localStorage.removeItem('nw_state'); location.reload(); } }
+    function handleLogout() {
+      if(confirm('Logout?')) {
+        fetch(API_BASE, { method: 'DELETE' }).catch(()=>{});
+        localStorage.removeItem('nw_state');
+        location.reload();
+      }
+    }
 
     // ===== UTILS =====
     function formatDate(d) {
@@ -1252,7 +1309,8 @@ img, canvas, svg {
     }
 
     // ===== INIT =====
-    function init() {
+    async function init() {
+      await loadStateFromServer();
       // set today's date
       const today = new Date().toISOString().split('T')[0];
       const txDate = document.getElementById('tx-date');
