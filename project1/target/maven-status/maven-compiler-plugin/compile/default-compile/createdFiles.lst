@@ -1,0 +1,6 @@
+com\networth\project1\state\AppStateEntity.class
+com\networth\project1\state\AppStateRepository.class
+com\networth\project1\state\AppStateController.class
+com\networth\project1\config\WebConfig.class
+com\networth\project1\state\AppStateService.class
+com\networth\project1\FinanceTrackerApplication.class
